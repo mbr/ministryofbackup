@@ -94,6 +94,32 @@ Features to think about in the futures
 * single-file diffs: When using snapshots, maybe keep the previous snapshot
 (possible on `COW <http://en.wikipedia.org/wiki/Copy-on-write>`_-filesystems
 like `btrfs`_) to calculate diffs and store these.
+* partial uploads: For large backups, allow backup up only a bit, rerunning mob
+to make a "incremental" backups to complete
+
+RAM requirements for fast amazon S3 uploads
+-------------------------------------------
+Amazon S3 is notoriously slow when not using the multi-part upload feature that
+allows large files to be uploaded in parallel. To get around this issue, mob
+chunks archive streams in memory and uploads them in parallel.
+
+The minimum memory requirement (compression and encryption aside) is
+
+    chunk_size * (n_threads+1)
+
+where the chunk_size is at least 5 MB and the number of threads defaults to 6.
+If your backup uploads are < 45 GB in size, you'll need no more than 35 MB of
+RAM.
+
+However, when uploading large files, one has to take into account that amazon
+limits the number of chunks to 5 TB, mob itself only allows slightly less than
+4.5 TB. This is fingers crossed, hoping that your *compressed* data won't end
+up being more than 10% *larger* than before compression.
+
+Taking this into account, uploading 4.5 TB in parallel (bad idea, wait for
+partial backups to be implemented!) would force a chunk-size of a little under
+500 MB, requiring 3 GB of memory with the default settings. However, you really
+should have more RAM than that and use more upload threads...
 
 .. _amazon S3: http://aws.amazon.com/s3/
 
