@@ -3,10 +3,13 @@
 
 from binascii import hexlify
 from hashlib import sha1
+from itertools import chain
 import mmap
+import multiprocessing
 import os
 import stat
 import sys
+import tarfile
 import time
 
 import msgpack
@@ -14,12 +17,37 @@ import progressbar
 import logbook
 from remember.memoize import memoize, memoized_property
 
+import multitar
+
 log = logbook.Logger(__name__)
 
 DATA_PROGRESS_BAR = ['Complete: ', progressbar.Percentage(), ' ',
                         progressbar.Bar(marker='#', left='[', right=']'),
                         ' ', progressbar.ETA(), ' ',
                         progressbar.FileTransferSpeed()]
+
+class HashReadWrap(object):
+    def __init__(self, fileobj, hashfunc=sha1):
+        self.h = hashfunc()
+        self.fileobj = fileobj
+        self.eofreached = False
+
+    def read(self, size=-1):
+        buf = self.fileobj.read(size)
+        if not buf:
+            self.eofreached = True
+        else:
+            self.h.update(buf)
+
+        return buf
+
+    def close(self):
+        return self.fileobj.close()
+
+    @property
+    def closed(self):
+        return self.fileobj.closed
+
 
 class MetaBase(object):
     """An object representing the metadata of an entity on the filesystem.
@@ -47,6 +75,13 @@ class FileMeta(MetaBase):
     def content_print(self):
         """Content prints rely only on the contents of the file - pretty much a
         'normal' application of the underlying hash function"""
+        if hasattr(self, '_fileobj'):
+            if self._fileobj.eofreached:
+                return self._fileobj.h.digest()
+            else:
+                log.warning('Hash of file required after partial read: %s' %\
+                            self.path)
+
         ftype = stat.S_IFMT(self.s.st_mode)
 
         if stat.S_IFLNK == ftype:
@@ -79,6 +114,10 @@ class FileMeta(MetaBase):
         stat_string = ' '.join(map(str, iter(self.s)))
         return sha1(stat_string).digest()
 
+    def open_read(self):
+        self._fileobj = HashReadWrap(open(self.path, 'rb'), sha1)
+
+        return self._fileobj
 
 class DirMeta(MetaBase):
     pass
@@ -329,7 +368,65 @@ if '__main__' == __name__:
         for rel_name in deleted:
             log.info("D %s" % rel_name)
 
+    # create pipes
+    tarpipe_r, tarpipe_w = os.pipe()
+    compress_r, compress_w = os.pipe()
+
+    with open('TARDUMP.tar.xz.mob', 'wb') as outfile:
+        def _target_compress(*args, **kwargs):
+            os.close(tarpipe_w)
+            multitar.compress(*args, **kwargs)
+
+        def _target_encrypt(*args, **kwargs):
+            os.close(tarpipe_w)
+            os.close(compress_w)
+            multitar.encrypt(*args, **kwargs)
+
+        comp_p = multiprocessing.Process(
+            target=_target_compress,
+            kwargs={
+                'srcfd': tarpipe_r,
+                'destfd': compress_w
+            }
+        )
+
+        enc_p = multiprocessing.Process(
+            target=_target_encrypt,
+            kwargs={
+                'srcfd': compress_r,
+                'destfd': outfile.fileno(),
+                'password': 'foo'
+            },
+        )
+
+        comp_p.daemon = True
+        comp_p.start()
+        enc_p.daemon = True
+        enc_p.start()
+
+        os.close(compress_w)
+
+    # start compression process
+    with os.fdopen(tarpipe_w, 'wb') as tar_w,\
+    tarfile.open(mode='w|', fileobj=tar_w) as archive:
+        for rel_name in chain(new, altered):
+            fm = db.files[rel_name]
+            log.debug('adding %r to archive' % fm.path)
+            tarinfo = archive.gettarinfo(fm.path, rel_name)
+            r = fm.open_read()
+            archive.addfile(tarinfo, r)
+
+            # tarinfo reads stats bytes, trigger end-of-file detection
+            assert '' == r.read()
+
+    log.debug('Waiting for compression process to finish...')
+    comp_p.join()
+    enc_p.join()
+
+
     # FIXME: upload file data here
+
+    # create index file?
 
     # transition over
     log.notice("Updating database")

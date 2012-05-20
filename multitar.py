@@ -37,17 +37,21 @@ DEFAULT_BUFSIZE = 4*1024**2
 # random number generator
 RNG = os.urandom
 
+
 def compress(srcfd, destfd, level=9, bufsize=DEFAULT_BUFSIZE):
     setproctitle('mob compression')
     log.debug("Starting compression in process %d" % os.getpid())
     compressor = LZMACompressor(options={'level': level})
-    log.debug("Compressiong level %d" % level)
+    log.debug("Compression level %d" % level)
 
     src = os.fdopen(srcfd, 'rb')
     dest = os.fdopen(destfd, 'wb')
 
     while True:
+        log.debug('Reading into buffer for compression')
         buf = src.read(bufsize)
+        log.debug('Read %d bytes' % len(buf))
+
         if not buf:
             break
         dest.write(compressor.compress(buf))
@@ -100,9 +104,11 @@ def encrypt(srcfd, destfd, password, bufsize=DEFAULT_BUFSIZE):
     )
 
     while True:
+        log.debug('Reading into buffer for encryption')
         buf = src.read(bufsize)
         if not buf:
             break
+        log.debug("Encrypting %d bytes" % len(buf))
         data = aes.update(buf)
         dest.write(data)
 
