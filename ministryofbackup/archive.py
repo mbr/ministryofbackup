@@ -3,14 +3,14 @@
 
 import hashlib
 from getpass import getpass
-from lzma import LZMACompressor, LZMADecompressor
 from multiprocessing import Process
 import os
-from setproctitle import setproctitle
 
 import logbook
+from lzma import LZMACompressor, LZMADecompressor
 import M2Crypto
 from M2Crypto.m2 import AES_BLOCK_SIZE
+from setproctitle import setproctitle
 
 log = logbook.Logger(__name__)
 
@@ -216,70 +216,3 @@ def create_input_chain(inputfd,
     unc_p.start()
 
     return [dec_p, unc_p]
-
-
-if '__main__' == __name__:
-    import argparse
-    import sys
-    import time
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('store', 'restore'))
-    parser.add_argument('-p', '--password', default=None)
-    parser.add_argument('-b', '--bufsize', default=DEFAULT_BUFSIZE, type=int)
-    parser.add_argument('-c', '--compression-level', type=int, default=9,
-                              choices=range(10))
-    parser.add_argument('-d', '--debug',
-                               action='append_const',
-                               const=logbook.DEBUG,
-                               dest='loglevel')
-    parser.add_argument('-v', '--verbose',
-                              action='append_const',
-                              const=logbook.INFO,
-                              dest='loglevel')
-    parser.add_argument('-i', '--infile',
-                        type=argparse.FileType('rb'),
-                        default=sys.stdin)
-    parser.add_argument('-o', '--outfile',
-                        type=argparse.FileType('wb'),
-                        default=sys.stdout)
-
-    args = parser.parse_args()
-
-    loglevel = min(args.loglevel) if args.loglevel else logbook.NOTICE
-
-    logbook.NullHandler().push_application()
-    logbook.StderrHandler(level=loglevel).push_application()
-
-    try:
-        password = args.password if args.password != None\
-                                 else getpass('Enter archive password: ')
-
-        start_time = time.time()
-        if 'store' == args.action:
-            log.info('Compressing and encrypting %s' % args.infile.name)
-            ps = create_output_chain(args.infile.fileno(),
-                                     args.outfile.fileno(),
-                                     password=password,
-                                     bufsize=args.bufsize,
-                                     compression_level=args.compression_level)
-        elif 'restore' == args.action:
-            log.info('Decrypting and decompressing %s' % args.infile.name)
-            ps = create_input_chain(args.infile.fileno(),
-                                    args.outfile.fileno(),
-                                    password=password,
-                                    bufsize=args.bufsize,
-                                    )
-
-        # wait for processes to end
-        for p in ps:
-            p.join()
-        end_time = time.time()
-
-        log.info('Done after %.1f seconds' % (end_time-start_time))
-    except Exception, e:
-        if loglevel <= logbook.DEBUG:
-            log.exception(e)
-        else:
-            log.error(e)
-        sys.exit(1)
