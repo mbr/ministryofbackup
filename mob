@@ -1,13 +1,25 @@
 #!/usr/bin/env python
 # coding=utf8
 
-from ministryofbackup import *
-
 import argparse
+from urlparse import urlparse
+
+from ministryofbackup import *
+from ministryofbackup.backend import FilesystemBackend
+
+def backend_url(v):
+    o = urlparse(v)
+
+    if not o.scheme in ('file',):
+        raise ValueError('Unknown scheme: %s' % o.scheme)
+
+    return o
+
 
 parser = argparse.ArgumentParser()
 parser.set_defaults(loglevel=logbook.NOTICE)
 parser.add_argument('directory')
+parser.add_argument('destination', type=backend_url)
 parser.add_argument('--db', default='fingerprints.db')
 parser.add_argument('-d', '--debug', action='store_true', default=False)
 
@@ -77,39 +89,41 @@ if args.loglevel >= logbook.INFO:
 tarpipe_r, tarpipe_w = os.pipe()
 compress_r, compress_w = os.pipe()
 
-with open('TARDUMP.tar.xz.mob', 'wb') as outfile:
-    def _target_compress(*args, **kwargs):
-        os.close(tarpipe_w)
-        multitar.compress(*args, **kwargs)
+backend = FilesystemBackend(args.destination.path)
+storagefd = backend.open_backup_archive('somebackup')
 
-    def _target_encrypt(*args, **kwargs):
-        os.close(tarpipe_w)
-        os.close(compress_w)
-        multitar.encrypt(*args, **kwargs)
+def _target_compress(*args, **kwargs):
+    os.close(tarpipe_w)
+    multitar.compress(*args, **kwargs)
 
-    comp_p = multiprocessing.Process(
-        target=_target_compress,
-        kwargs={
-            'srcfd': tarpipe_r,
-            'destfd': compress_w
-        }
-    )
-
-    enc_p = multiprocessing.Process(
-        target=_target_encrypt,
-        kwargs={
-            'srcfd': compress_r,
-            'destfd': outfile.fileno(),
-            'password': 'foo'
-        },
-    )
-
-    comp_p.daemon = True
-    comp_p.start()
-    enc_p.daemon = True
-    enc_p.start()
-
+def _target_encrypt(*args, **kwargs):
+    os.close(tarpipe_w)
     os.close(compress_w)
+    multitar.encrypt(*args, **kwargs)
+
+comp_p = multiprocessing.Process(
+    target=_target_compress,
+    kwargs={
+        'srcfd': tarpipe_r,
+        'destfd': compress_w
+    }
+)
+
+enc_p = multiprocessing.Process(
+    target=_target_encrypt,
+    kwargs={
+        'srcfd': compress_r,
+        'destfd': storagefd,
+        'password': 'foo'
+    },
+)
+
+comp_p.daemon = True
+comp_p.start()
+enc_p.daemon = True
+enc_p.start()
+
+os.close(compress_w)
 
 # start compression process
 with os.fdopen(tarpipe_w, 'wb') as tar_w,\
@@ -127,6 +141,8 @@ tarfile.open(mode='w|', fileobj=tar_w) as archive:
 log.debug('Waiting for compression process to finish...')
 comp_p.join()
 enc_p.join()
+
+os.close(storagefd)
 
 
 # FIXME: upload file data here

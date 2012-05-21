@@ -147,7 +147,7 @@ class Database(object):
             'meta_prints': self.meta_prints,
             'content_prints': self.content_prints
         }
-        msgpack.dump(db_dict, f)
+        msgpack.dump(db_dict, outfile)
 
     def get_altered_files(self, fileset=None, progress=None):
         """Return a list of all files that have been altered (in comparison
@@ -249,13 +249,13 @@ class Database(object):
         files = {}
         dirs = {}
 
-        for root, ds, fs in os.walk(base):
-            rel_root = root[len(base)+1:]
+        for root, ds, fs in os.walk(self.base):
+            rel_root = root[len(self.base)+1:]
             root_meta = DirMeta(root)
 
             for f in fs:
                 full_name = os.path.join(root, f)
-                rel_name = full_name[len(base)+1:]
+                rel_name = full_name[len(self.base)+1:]
                 f_meta = FileMeta(full_name)
                 files[rel_name] = f_meta
                 root_meta.children.append(f_meta)
