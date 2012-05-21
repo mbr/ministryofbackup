@@ -252,10 +252,8 @@ if '__main__' == __name__:
     logbook.StderrHandler(level=loglevel).push_application()
 
     try:
-        if None == args.password:
-            password = getpass('Enter archive password: ')
-        else:
-            password = args.password
+        password = args.password if args.password != None\
+                                 else getpass('Enter archive password: ')
 
         start_time = time.time()
         if 'store' == args.action:
