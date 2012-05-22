@@ -2,6 +2,7 @@
 # coding=utf8
 
 import hashlib
+from functools import wraps, partial
 from getpass import getpass
 from multiprocessing import Process
 import os
@@ -11,6 +12,8 @@ from lzma import LZMACompressor, LZMADecompressor
 import M2Crypto
 from M2Crypto.m2 import AES_BLOCK_SIZE
 from setproctitle import setproctitle
+
+from ministryofbackup.fds import chain_funcs
 
 log = logbook.Logger(__name__)
 
@@ -147,72 +150,25 @@ def decrypt(srcfd, destfd, password, bufsize=DEFAULT_BUFSIZE):
     dest.write(aes.final())
 
 
-def create_output_chain(inputfd,
-                        outputfd,
+def create_output_chain(srcfd,
+                        destfd,
                         password,
                         bufsize=DEFAULT_BUFSIZE,
                         compression_level=9
                        ):
-    log.debug('Setting up output chain from process %d' % os.getpid())
 
-    encrypt_fdr, encrypt_fdw = os.pipe()
+    comp_target = partial(compress, bufsize=bufsize, level=compression_level)
+    enc_target = partial(encrypt, password=password, bufsize=bufsize)
 
-    # compression
-    comp_p = Process(target=compress, kwargs={
-        'srcfd': inputfd,
-        'destfd': encrypt_fdw,
-        'level': compression_level,
-        'bufsize': bufsize,
-    })
-
-    comp_p.daemon = True
-    comp_p.start()
-
-    # close open fd, so encrypt doesn't hang
-    os.close(encrypt_fdw)
-
-    enc_p = Process(target=encrypt, kwargs={
-        'srcfd': encrypt_fdr,
-        'destfd': outputfd,
-        'password': password,
-        'bufsize': bufsize,
-    })
-
-    enc_p.daemon = True
-    enc_p.start()
-
-    return [comp_p, enc_p]
+    return chain_funcs(srcfd, destfd, [comp_target, enc_target])
 
 
-def create_input_chain(inputfd,
-                       outputfd,
+def create_input_chain(srcfd,
+                       destfd,
                        password,
                        bufsize=DEFAULT_BUFSIZE,
                       ):
-    log.debug('Setting up input chain from process %d' % os.getpid())
+    unc_target = partial(decompress, bufsize=bufsize)
+    dec_target = partial(decrypt, password=password, bufsize=bufsize)
 
-    compress_fdr, compress_fdw = os.pipe()
-
-    # decryption
-    dec_p = Process(target=decrypt, kwargs={
-        'srcfd': inputfd,
-        'destfd': compress_fdw,
-        'password': password,
-        'bufsize': bufsize,
-    })
-
-    dec_p.daemon = True
-    dec_p.start()
-
-    os.close(compress_fdw)
-
-    unc_p = Process(target=decompress, kwargs={
-        'srcfd': compress_fdr,
-        'destfd': outputfd,
-        'bufsize': bufsize,
-    })
-
-    unc_p.daemon = True
-    unc_p.start()
-
-    return [dec_p, unc_p]
+    return chain_funcs(srcfd, destfd, [dec_target, unc_target])

@@ -2,6 +2,7 @@
 # coding=utf8
 
 from ministryofbackup.archive import *
+from ministryofbackup.fds import FileDescriptorRegistry
 
 import argparse
 import sys
