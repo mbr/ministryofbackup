@@ -13,8 +13,6 @@ import M2Crypto
 from M2Crypto.m2 import AES_BLOCK_SIZE
 from setproctitle import setproctitle
 
-from ministryofbackup.fds import chain_funcs
-
 log = logbook.Logger(__name__)
 
 # the mob header, currently uses the form of 'mobX', where X is the file format
@@ -150,20 +148,22 @@ def decrypt(srcfd, destfd, password, bufsize=DEFAULT_BUFSIZE):
     dest.write(aes.final())
 
 
-def create_output_chain(srcfd,
+def create_output_chain(fdreg,
+                        srcfd,
                         destfd,
                         password,
                         bufsize=DEFAULT_BUFSIZE,
-                        compression_level=9
+                        compression_level=9,
                        ):
 
     comp_target = partial(compress, bufsize=bufsize, level=compression_level)
     enc_target = partial(encrypt, password=password, bufsize=bufsize)
 
-    return chain_funcs(srcfd, destfd, [comp_target, enc_target])
+    return fdreg.chain_funcs(srcfd, destfd, [comp_target, enc_target])
 
 
-def create_input_chain(srcfd,
+def create_input_chain(fdreg,
+                       srcfd,
                        destfd,
                        password,
                        bufsize=DEFAULT_BUFSIZE,
@@ -171,4 +171,4 @@ def create_input_chain(srcfd,
     unc_target = partial(decompress, bufsize=bufsize)
     dec_target = partial(decrypt, password=password, bufsize=bufsize)
 
-    return chain_funcs(srcfd, destfd, [dec_target, unc_target])
+    return fdreg.chain_funcs(srcfd, destfd, [dec_target, unc_target])

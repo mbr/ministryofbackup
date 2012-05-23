@@ -41,20 +41,27 @@ try:
                              else getpass('Enter archive password: ')
 
     start_time = time.time()
+    fdreg = FileDescriptorRegistry()
+    fdreg.add_fd(args.infile.fileno())
+    fdreg.add_fd(args.outfile.fileno())
     if 'store' == args.action:
         log.info('Compressing and encrypting %s' % args.infile.name)
-        ps = create_output_chain(args.infile.fileno(),
+        ps = create_output_chain(fdreg,
+                                 args.infile.fileno(),
                                  args.outfile.fileno(),
                                  password=password,
                                  bufsize=args.bufsize,
                                  compression_level=args.compression_level)
     elif 'restore' == args.action:
         log.info('Decrypting and decompressing %s' % args.infile.name)
-        ps = create_input_chain(args.infile.fileno(),
+        ps = create_input_chain(fdreg,
+                                args.infile.fileno(),
                                 args.outfile.fileno(),
                                 password=password,
-                                bufsize=args.bufsize,
-                                )
+                                bufsize=args.bufsize)
+
+    # close unneeded fds
+    fdreg.close_all_except((args.infile.fileno(), args.outfile.fileno()))
 
     # wait for processes to end
     for p in ps:
