@@ -75,7 +75,10 @@ class FileDescriptorRegistry(object):
                 log.debug(
                     'Closing file descriptor %d in process %d' % (fd, pid)
                 )
-                os.close(fd)
+                try:
+                    os.close(fd)
+                except OSError, e:
+                    log.debug('Error closing %d, ignored: %s' % (fd, e))
 
         self.fds = set(new_fds)
 

@@ -2,26 +2,33 @@
 # coding=utf8
 
 import argparse
-from urlparse import urlparse
+from binascii import hexlify
+from getpass import getpass
+from itertools import chain
+import msgpack
+import os
+import tarfile
+import time
+import sys
 
-from ministryofbackup import *
+import logbook
+import progressbar
+
+from ministryofbackup import Database, backend_url, DATA_PROGRESS_BAR
 from ministryofbackup.backend import FilesystemBackend
+from ministryofbackup.fds import FileDescriptorRegistry
+from ministryofbackup.archive import create_output_chain, DEFAULT_BUFSIZE
 
-def backend_url(v):
-    o = urlparse(v)
-
-    if not o.scheme in ('file',):
-        raise ValueError('Unknown scheme: %s' % o.scheme)
-
-    return o
-
+log = logbook.Logger('mob')
 
 parser = argparse.ArgumentParser()
 parser.set_defaults(loglevel=logbook.NOTICE)
 parser.add_argument('directory')
 parser.add_argument('destination', type=backend_url)
 parser.add_argument('--db', default='fingerprints.db')
-parser.add_argument('-d', '--debug', action='store_true', default=False)
+parser.add_argument('-b', '--bufsize', default=DEFAULT_BUFSIZE, type=int)
+parser.add_argument('-d', '--debug', action='count', default=0)
+parser.add_argument('-p', '--password', default=None)
 
 logargs = parser.add_mutually_exclusive_group()
 logargs.add_argument('-v', '--verbose', const=logbook.INFO,
@@ -31,11 +38,20 @@ logargs.add_argument('-q', '--quiet', const=logbook.WARNING,
 
 args = parser.parse_args()
 
+# set up logging
 logbook.NullHandler().push_application()
 logbook.StderrHandler(
-    level=logbook.DEBUG if args.debug else args.loglevel
+    level=logbook.DEBUG if args.debug else args.loglevel,
+    format_string='{record.channel}[{record.process}]: {record.message}'
 ).push_application()
 
+fdreg = FileDescriptorRegistry()
+
+# prompt for password
+password = args.password if args.password != None\
+                         else getpass('Enter archive password: ')
+
+# set up database
 base = os.path.abspath(args.directory)
 log.debug("Base directory: %s" % base)
 
@@ -47,7 +63,7 @@ else:
     log.notice("New fingerprint database")
     db = Database(base)
 
-if args.debug:
+if args.debug>1:
     log.debug("META, CONTENT, RELNAME")
     for rel_name, meta_print in db.meta_prints.iteritems():
         log.debug('%s %s %s' % (hexlify(meta_print),\
@@ -85,52 +101,33 @@ if args.loglevel >= logbook.INFO:
     for rel_name in deleted:
         log.info("D %s" % rel_name)
 
-# create pipes
-tarpipe_r, tarpipe_w = os.pipe()
-compress_r, compress_w = os.pipe()
+# metadata
+meta = {
+    'timestamp': time.gmtime(),
+}
 
+# set up compression and encryption
 backend = FilesystemBackend(args.destination.path)
 storagefd = backend.open_backup_archive('somebackup')
+fdreg.add_fd(storagefd)
 
-def _target_compress(*args, **kwargs):
-    os.close(tarpipe_w)
-    multitar.compress(*args, **kwargs)
+tarpipe_r, tarpipe_w = fdreg.pipe()
+log.debug(str(fdreg))
 
-def _target_encrypt(*args, **kwargs):
-    os.close(tarpipe_w)
-    os.close(compress_w)
-    multitar.encrypt(*args, **kwargs)
+# keep tarpipe_w, as we're writing to it
 
-comp_p = multiprocessing.Process(
-    target=_target_compress,
-    kwargs={
-        'srcfd': tarpipe_r,
-        'destfd': compress_w
-    }
-)
+ps = create_output_chain(fdreg,
+                         tarpipe_r,
+                         storagefd,
+                         args.password,
+                         args.bufsize)
 
-enc_p = multiprocessing.Process(
-    target=_target_encrypt,
-    kwargs={
-        'srcfd': compress_r,
-        'destfd': storagefd,
-        'password': 'foo'
-    },
-)
-
-comp_p.daemon = True
-comp_p.start()
-enc_p.daemon = True
-enc_p.start()
-
-os.close(compress_w)
-
-# start compression process
 with os.fdopen(tarpipe_w, 'wb') as tar_w,\
 tarfile.open(mode='w|', fileobj=tar_w) as archive:
     for rel_name in chain(new, altered):
         fm = db.files[rel_name]
-        log.debug('adding %r to archive' % fm.path)
+        if args.debug>1:
+            log.debug('adding %r to archive' % fm.path)
         tarinfo = archive.gettarinfo(fm.path, rel_name)
         r = fm.open_read()
         archive.addfile(tarinfo, r)
@@ -138,22 +135,46 @@ tarfile.open(mode='w|', fileobj=tar_w) as archive:
         # tarinfo reads stats bytes, trigger end-of-file detection
         assert '' == r.read()
 
-log.debug('Waiting for compression process to finish...')
-comp_p.join()
-enc_p.join()
+fdreg.close_all_except()
 
-os.close(storagefd)
+log.debug('Waiting for processes to finish...')
+for p in ps:
+    p.join()
+log.debug('Finshed storing archive')
 
+# we already have new and altered files, need to add metadata of changed files
+meta['deleted'] = deleted
+meta['updated'] = {}
+for fn in updated:
+    meta['updated'][fn] = db.files[fn].meta_tuple
 
-# FIXME: upload file data here
+metapipe_r, metapipe_w = fdreg.pipe()
+metastoragefd = backend.open_backup_meta('somebackup')
+fdreg.add_fd(metastoragefd)
 
-# create index file?
+ps = create_output_chain(fdreg,
+                         metapipe_r,
+                         metastoragefd,
+                         args.password,
+                         args.bufsize)
+
+with os.fdopen(metapipe_w, 'wb') as m:
+    log.debug('Writing metadata archive')
+    # write header
+    m.write('metamob1')
+    msgpack.dump(meta, m)
+    log.debug(repr(meta))
+
+fdreg.close_all_except()
+log.debug('Waiting for processes to finish...')
+for p in ps:
+    p.join()
+log.debug('Finshed storing metadata')
 
 # transition over
 log.notice("Updating database")
 db.update_meta()
 
-# FIXME: upload database to s3?
 log.debug("Writing to database")
 
 with open(args.db, 'wb') as f:

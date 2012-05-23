@@ -1,23 +1,19 @@
 #!/usr/bin/env python
 # coding=utf8
 
-from binascii import hexlify
+from collections import namedtuple
 from hashlib import sha1
-from itertools import chain
 import mmap
-import multiprocessing
 import os
 import stat
 import sys
-import tarfile
 import time
+from urlparse import urlparse
 
 import msgpack
-import progressbar
 import logbook
+import progressbar
 from remember.memoize import memoize, memoized_property
-
-import multitar
 
 log = logbook.Logger(__name__)
 
@@ -25,6 +21,17 @@ DATA_PROGRESS_BAR = ['Complete: ', progressbar.Percentage(), ' ',
                         progressbar.Bar(marker='#', left='[', right=']'),
                         ' ', progressbar.ETA(), ' ',
                         progressbar.FileTransferSpeed()]
+
+
+def backend_url(v):
+    o = urlparse(v)
+
+    if not o.scheme in ('file',):
+        raise ValueError('Unknown scheme: %s' % o.scheme)
+
+    #log.debug('Parsed url %r to %r' % (v, o))
+    return o
+
 
 class HashReadWrap(object):
     def __init__(self, fileobj, hashfunc=sha1):
@@ -65,6 +72,10 @@ class MetaBase(object):
 
     def __repr__(self):
         return '%s(%r)' % (self.__class__.__name__, self.path)
+
+
+MetaTuple = namedtuple('MetaTuple', ['mode', 'uid', 'gid', 'size', 'atime',
+                                     'mtime', 'ctime'])
 
 
 class FileMeta(MetaBase):
@@ -113,6 +124,18 @@ class FileMeta(MetaBase):
 
         stat_string = ' '.join(map(str, iter(self.s)))
         return sha1(stat_string).digest()
+
+    @memoized_property
+    def meta_tuple(self):
+        return MetaTuple(
+            mode=self.s.st_mode,
+            uid=self.s.st_uid,
+            gid=self.s.st_gid,
+            size=self.s.st_size,
+            atime=self.s.st_atime,
+            mtime=self.s.st_mtime,
+            ctime=self.s.st_ctime,
+        )
 
     def open_read(self):
         self._fileobj = HashReadWrap(open(self.path, 'rb'), sha1)
