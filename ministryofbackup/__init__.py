@@ -8,12 +8,15 @@ import os
 import stat
 import sys
 import time
+from urllib import unquote
 from urlparse import urlparse
 
 import msgpack
 import logbook
 import progressbar
 from remember.memoize import memoize, memoized_property
+
+from backend import FilesystemBackend, BotoBackend
 
 log = logbook.Logger(__name__)
 
@@ -26,11 +29,31 @@ DATA_PROGRESS_BAR = ['Complete: ', progressbar.Percentage(), ' ',
 def backend_url(v):
     o = urlparse(v)
 
-    if not o.scheme in ('file',):
+    # FIXME: support gs by adding scheme and a way to disable multipart
+    #        uploading
+    if not o.scheme in ('file', 's3'):
         raise ValueError('Unknown scheme: %s' % o.scheme)
 
-    #log.debug('Parsed url %r to %r' % (v, o))
+    if 's3' == o.scheme:
+        if not o.netloc:
+            raise ValueError('No bucket name specified: %s' % v)
+
+    log.debug('Parsed url %r to %r' % (v, o))
     return o
+
+
+def create_backend(urldata):
+    if 'file' == urldata.scheme:
+        return FilesystemBackend(urldata.path)
+    elif 's3' == urldata.scheme:
+        pw = unquote(urldata.password or '')
+        #log.debug('S3 secret key: %s' % pw)
+        return BotoBackend(
+            access_key=unquote(urldata.username),
+            secret_key=unquote(pw),
+            bucket_name=unquote(urldata.hostname),
+            prefix=unquote(urldata.path)
+        )
 
 
 class HashReadWrap(object):

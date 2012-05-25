@@ -14,8 +14,8 @@ import sys
 import logbook
 import progressbar
 
-from ministryofbackup import Database, backend_url, DATA_PROGRESS_BAR
-from ministryofbackup.backend import FilesystemBackend
+from ministryofbackup import Database, backend_url, DATA_PROGRESS_BAR,\
+                             create_backend
 from ministryofbackup.fds import FileDescriptorRegistry
 from ministryofbackup.archive import create_output_chain, DEFAULT_BUFSIZE
 
@@ -107,7 +107,7 @@ meta = {
 }
 
 # set up compression and encryption
-backend = FilesystemBackend(args.destination.path)
+backend = create_backend(args.destination)
 storagefd = backend.open_backup_archive('somebackup')
 fdreg.add_fd(storagefd)
 
