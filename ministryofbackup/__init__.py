@@ -261,12 +261,17 @@ class Database(object):
 
         return new, updated
 
-    def get_sizes_of(self, fileset):
+    def get_sizes_of(self, fileset=None):
         """Calculate the total size in bytes of all files in a set.
 
         :param fileset: Relative names to files whose sizes are to be summed.
+                        If None, sum over all files.
         :return: Sum of filesizes in bytes.
         """
+
+        if None == fileset:
+            return sum(fm.filesize for fm in self.files.itervalues())
+
         return sum(self.files[rel_name].filesize for rel_name in fileset)
 
     @classmethod

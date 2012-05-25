@@ -15,16 +15,21 @@ class FileDescriptorRegistry(object):
 
     def __init__(self, fds=None):
         self.fds = set(fds or [])
+        log.debug('New FileDescriptorRegistry created: %s' % hash(self))
 
-    #@classmethod
-    #def get_global_instance(cls):
-    #    if not cls._global_instance:
-    #        cls._global_instance = cls()
+    @classmethod
+    def get_global_instance(cls):
+        if not cls._global_instance:
+            cls._global_instance = cls()
 
-    #    return cls._global_instance
+        return cls._global_instance
 
     def add_fd(self, fd):
+        if not isinstance(fd, int):
+            fd = fd.fileno()
+
         self.fds.add(fd)
+        log.debug('Added %d to FileDescriptorRegistry %s' % (fd, hash(self)))
 
     def chain_funcs(self, srcfd, destfd, funcs):
         ps = []
@@ -100,6 +105,7 @@ class FileDescriptorRegistry(object):
     def pipe(self):
         pipe_fds = os.pipe()
         self.fds.update(pipe_fds)
+        log.debug('Created new pipe: r=%d, w=%d' % pipe_fds)
 
         return pipe_fds
 

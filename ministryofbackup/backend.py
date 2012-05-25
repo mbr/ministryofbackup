@@ -11,23 +11,27 @@ from boto.exception import AWSConnectionError
 import logbook
 from setproctitle import setproctitle
 
+from fds import FileDescriptorRegistry
+
 log = logbook.Logger('backend')
 
+ARCHIVE_ENDING = '.tar.xz.mob'
+META_ENDING = '.mdx.xz.mob'
 
 class FilesystemBackend(object):
     def __init__(self, basepath):
         self.basepath = os.path.join(os.path.abspath(basepath))
 
-    def open_backup_archive(self, backup_id, ending='.tar.xz.mob'):
+    def open_backup_archive(self, backup_id):
         """Returns a file descriptor to write to for storing the backup
         archive."""
 
-        fn = os.path.join(self.basepath, '%s%s' % (backup_id, ending))
+        fn = os.path.join(self.basepath, '%s%s' % (backup_id, ARCHIVE_ENDING))
         log.debug('Opened filesystem archive: %s' % fn)
         return os.open(fn, os.O_CREAT | os.O_WRONLY | os.O_EXCL)
 
-    def open_backup_meta(self, backup_id, ending='.mdx.xz.mob'):
-        fn = os.path.join(self.basepath, '%s%s' % (backup_id, ending))
+    def open_backup_meta(self, backup_id):
+        fn = os.path.join(self.basepath, '%s%s' % (backup_id, META_ENDING))
         log.debug('Opened filesystem meta: %s' % fn)
         return os.open(fn, os.O_CREAT | os.O_WRONLY | os.O_EXCL)
 
@@ -51,6 +55,27 @@ class BotoBackend(object):
         self.pool_size = pool_size
         self.num_retries = 10
 
+        self.running_tasks = []
+
+    def open_backup_archive(self, backup_id,
+                                  uncompressed_size,
+                                  ):
+        return self._create_upload_process(
+            key_name=self.prefix + '/' + backup_id + ARCHIVE_ENDING,
+            # 1% + 1 megabyte safety margins
+            expected_size=uncompressed_size * 1.01 + 1024**2,
+        )
+
+    def open_backup_meta(self, backup_id):
+        return self._create_upload_process(
+            key_name=self.prefix + '/' + backup_id + META_ENDING,
+        )
+
+    def wait_for_completion(self):
+        for task in self.running_tasks:
+            task.join()
+            self.running_tasks.remove(task)
+
     def _calc_part_size(self, total_size):
         if total_size > self.MAX_FILESIZE:
             raise ValueError(
@@ -58,7 +83,7 @@ class BotoBackend(object):
                 % (total_size, self.MAX_FILESIZE)
             )
 
-        if total_size < MULTI_UPLOAD_THRESHOLD:
+        if total_size < self.MULTI_UPLOAD_THRESHOLD:
             return None  # none == use single file upload
 
         part_size = total_size // self.MULTI_UPLOAD_MAX_PARTS
@@ -74,6 +99,23 @@ class BotoBackend(object):
         ))
 
         return part_size
+
+    def _create_upload_process(self, **kwargs):
+        fdreg = FileDescriptorRegistry.get_global_instance()
+        task_r, task_w = fdreg.pipe()
+        kwargs['fd'] = task_r
+        task = multiprocessing.Process(
+            target=fdreg.closing_all_except([task_r])(self._upload_fd),
+            kwargs=kwargs
+        )
+        task.daemon = True
+        task.start()
+
+        log.debug('Started upload background process, pid %d' % task.pid)
+
+        self.running_tasks.append(task)
+
+        return task_w
 
     def _initialize_workers(self, queue_size, *args):
         log.debug('Initializing new set of workers')
@@ -105,20 +147,22 @@ class BotoBackend(object):
 
     def _open_boto_bucket(self):
         conn = S3Connection(self.access_key, self.secret_key)
-        bucket = conn.get_bucket(self.bucketname)
-        log.debug('Opened S3 connection, bucket "%s"' % self.bucketname)
+        bucket = conn.get_bucket(self.bucket_name)
+        log.debug('Opened S3 connection, bucket "%s"' % self.bucket_name)
 
         return bucket
 
-    def _upload_fd(self, key_name, fd, expected_size):
+    def _upload_fd(self, key_name, fd, expected_size=None):
         bucket = self._open_boto_bucket()
-        part_size = self._calc_part_size(expected_size)
+        part_size = self._calc_part_size(expected_size) if expected_size\
+                                                        else None
 
         # open fd for reading, this is means it will probably be closed
         # once this function returns
         inp = os.fdopen(fd, 'rb')
 
         # fill buffer
+        log.debug('Prefilling buffer...')
         if not part_size:
             buf = inp.read()
         else:
@@ -151,10 +195,10 @@ class BotoBackend(object):
             mp.complete_upload()
         else:
             log.debug('Uploading fd %d to "%s" using normal upload' %
-                fd, key_name
+                (fd, key_name)
             )
 
-            k = Key(self.bucket)
+            k = Key(bucket)
             k.key = key_name
             k.set_contents_from_string(buf)
 

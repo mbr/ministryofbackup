@@ -45,7 +45,7 @@ logbook.StderrHandler(
     format_string='{record.channel}[{record.process}]: {record.message}'
 ).push_application()
 
-fdreg = FileDescriptorRegistry()
+fdreg = FileDescriptorRegistry.get_global_instance()
 
 # prompt for password
 password = args.password if args.password != None\
@@ -102,13 +102,18 @@ if args.loglevel >= logbook.INFO:
         log.info("D %s" % rel_name)
 
 # metadata
+backup_id = 'somebackup'
+uncompressed_size = db.get_sizes_of()
 meta = {
     'timestamp': time.gmtime(),
+    'backup-id': backup_id,
+    'uncompressed_size': uncompressed_size
 }
 
-# set up compression and encryption
 backend = create_backend(args.destination)
-storagefd = backend.open_backup_archive('somebackup')
+
+# set up compression and encryption
+storagefd = backend.open_backup_archive(backup_id, uncompressed_size)
 fdreg.add_fd(storagefd)
 
 tarpipe_r, tarpipe_w = fdreg.pipe()
@@ -140,6 +145,8 @@ fdreg.close_all_except()
 log.debug('Waiting for processes to finish...')
 for p in ps:
     p.join()
+log.debug('Compression and encryption finished, waiting for backend')
+backend.wait_for_completion()
 log.debug('Finshed storing archive')
 
 # we already have new and altered files, need to add metadata of changed files
@@ -149,7 +156,7 @@ for fn in updated:
     meta['updated'][fn] = db.files[fn].meta_tuple
 
 metapipe_r, metapipe_w = fdreg.pipe()
-metastoragefd = backend.open_backup_meta('somebackup')
+metastoragefd = backend.open_backup_meta(backup_id)
 fdreg.add_fd(metastoragefd)
 
 ps = create_output_chain(fdreg,
@@ -169,6 +176,8 @@ fdreg.close_all_except()
 log.debug('Waiting for processes to finish...')
 for p in ps:
     p.join()
+log.debug('Compression and encryption finished, waiting for backend')
+backend.wait_for_completion()
 log.debug('Finshed storing metadata')
 
 # transition over
