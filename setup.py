@@ -22,6 +22,6 @@ setup(name='ministryofbackup',
       license='MIT',
       packages=find_packages(exclude=['tests']),
       install_requires=['logbook', 'M2Crypto', 'pyliblzma', 'setproctitle',
-                        'msgpack-python', 'progressbar', 'remember'],
+                        'msgpack-python', 'progressbar', 'remember', 'boto'],
       scripts=['mobarchive', 'mob'],
      )
