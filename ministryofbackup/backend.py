@@ -47,7 +47,7 @@ class BotoBackend(object):
                        secret_key,
                        bucket_name,
                        prefix,
-                       pool_size=10):
+                       pool_size=6):
         self.access_key = access_key
         self.secret_key = secret_key
         self.bucket_name = bucket_name
