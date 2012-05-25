@@ -10,6 +10,7 @@ import sys
 import time
 from urllib import unquote
 from urlparse import urlparse
+import uuid
 
 import msgpack
 import logbook
@@ -186,12 +187,14 @@ class Database(object):
         self.base = base
         self.meta_prints = {}
         self.content_prints = {}
+        self.series_id = str(uuid.uuid4())
 
     def dump(self, outfile):
         """Write a serialized version of the database to filehandle."""
         db_dict = {
             'meta_prints': self.meta_prints,
-            'content_prints': self.content_prints
+            'content_prints': self.content_prints,
+            'series_id': self.series_id,
         }
         msgpack.dump(db_dict, outfile)
 
@@ -288,6 +291,7 @@ class Database(object):
         db = cls(base)
         db.meta_prints = db_dict['meta_prints']
         db.content_prints = db_dict['content_prints']
+        db.series_id = db_dict['series_id']
 
         return db
 

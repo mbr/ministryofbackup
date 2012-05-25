@@ -3,6 +3,7 @@
 
 import argparse
 from binascii import hexlify
+from datetime import datetime
 from getpass import getpass
 from itertools import chain
 import msgpack
@@ -102,10 +103,15 @@ if args.loglevel >= logbook.INFO:
         log.info("D %s" % rel_name)
 
 # metadata
-backup_id = 'somebackup'
+current_time = datetime.utcnow()
+backup_id = '%s@%s' % (
+    db.series_id,
+    current_time.strftime('%Y-%m-%d-%H-%M-%S')
+)
+log.info('Backup id is %s' % backup_id)
 uncompressed_size = db.get_sizes_of()
 meta = {
-    'timestamp': time.gmtime(),
+    'timestamp': current_time.timetuple(),
     'backup-id': backup_id,
     'uncompressed_size': uncompressed_size
 }
