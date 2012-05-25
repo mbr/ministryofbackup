@@ -21,7 +21,7 @@ from ministryofbackup.archive import create_output_chain, DEFAULT_BUFSIZE
 
 log = logbook.Logger('mob')
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(fromfile_prefix_chars='@')
 parser.set_defaults(loglevel=logbook.NOTICE)
 parser.add_argument('directory')
 parser.add_argument('destination', type=backend_url)
