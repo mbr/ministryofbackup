@@ -2,6 +2,12 @@ Ministry of Backup
 ==================
 Don't you hate long README's? =)
 
+Current state of this software
+------------------------------
+This is the very first version that is actually somewhat usable. **You will be
+able to make backups, but not restore them**. In other words, this is a
+development preview, nothing more.
+
 Motivation
 ----------
 *Skip this section if you like!*
@@ -17,22 +23,22 @@ My personal documents at that time weighed in at 47G, spread over a litte over
 110,000 files in 20,000 directories. The most comfortable approach seemed to be
 `Dropbox <http://dropbox.com>`_, but the version I tried choked heavily even
 trying to index a folder this large. In short, I did not want to wait about 1-2
-weeks for it finish backup up, if at all.
+weeks for it finish backing up, if at all.
 
-A number of other solutions are available, to prominent candidates are `s3fs
+A number of other solutions are available, two promising candidates are `s3fs
 (FuseOverAmazon) <http://code.google.com/p/s3fs/wiki/FuseOverAmazon>`_ and
 `s3backer <https://code.google.com/p/s3backer/>`_. These are really cool tools,
-however, in both cases they result in a lot of small files to be created
-uploaded, which S3 doesn't do very well. The overhead from the HTTP-based API
+however both cases result in a lot of small files to be created and uploaded,
+which S3 doesn't do very well. The overhead from the HTTP-based protocol
 essentially kills this. Both tools also did not go to much length to give me
 any idea what was going on and the frequent pauses in uploading are enough to
 drive me mad.
 
 At the conclusion that only incremental backups with archives can be a good
-solution, I gave `duplicity <http://duplicity.nongnu.org/>`_. I tried it with
-and without the nice-looking `Déjà Dup <http://live.gnome.org/DejaDup>`_
-frontend, but the result were horrible: Either support for the Ireland region
-of S3 was bad, in the end, the whole tool crashed a little too often for me to
+solution, I gave `duplicity <http://duplicity.nongnu.org/>`_ a shot. I tried
+it with and without the cute `Déjà Dup <http://live.gnome.org/DejaDup>`_
+frontend, but the results were horrible: Either support for the Ireland region
+of S3 was bad. In the end, the whole tool crashed a little too often for me to
 feel secure and offered no obvious way of simply *extracting* (not restoring!)
 backups should things go wrong. The whole "S3 backend" (one among many) seems
 rather like an afterthought and badly implemented. I decided I'd rather not
@@ -47,7 +53,6 @@ The Ministry of Backup, short: *mob*, is a tool that keeps incremental backups
 of a folder on `amazon S3`_. The backups need to be:
 
 * encrypted: Encryption should be done by an established tool or library
-somewhat restorable
 * restorable without mob: At most 30-60 minutes of writing a small worst-case
 tool should be able to get the data back even when mob is not available.
 * reasonably space-efficient: Ideally, we do not waste any space. Some things
@@ -71,7 +76,7 @@ SHA1 as a hash-algorithm for a file, as it will never max out CPU usage on my
 machine even when hashing from SSD.
 * Plenty of memory: We are not working with a heavily memory restrained
 computer. It's okay to keep the whole file list in memory and maybe even make a
-copy of it occasionally.
+copy of it occasionally, as well as large buffers.
 * Big uplink (at least for a home machine): There is plenty of upload bandwidth
 (upwards of 1M/s) available and some measures should be taken to max these as
 much as possible.
@@ -94,8 +99,8 @@ Features to think about in the futures
 * single-file diffs: When using snapshots, maybe keep the previous snapshot
 (possible on `COW <http://en.wikipedia.org/wiki/Copy-on-write>`_-filesystems
 like `btrfs`_) to calculate diffs and store these.
-* partial uploads: For large backups, allow backup up only a bit, rerunning mob
-to make a "incremental" backups to complete
+* partial uploads: For large backups, allow backing up only a bit, rerunning
+mob to make a "incremental" backups to complete
 
 RAM requirements for fast amazon S3 uploads
 -------------------------------------------
