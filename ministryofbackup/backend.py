@@ -41,12 +41,12 @@ class BotoBackend(object):
 
     def __init__(self, access_key,
                        secret_key,
-                       bucket,
+                       bucket_name,
                        prefix,
                        pool_size=10):
         self.access_key = access_key
         self.secret_key = secret_key
-        self.bucketname = bucketname
+        self.bucket_name = bucket_name
         self.prefix = prefix
         self.pool_size = pool_size
         self.num_retries = 10
@@ -125,15 +125,17 @@ class BotoBackend(object):
             buf = inp.read(part_size)
 
         if part_size and len(buf) >= self.MULTI_UPLOAD_MIN_FILE_SIZE:
-            log.debug('Uploading fd %d using multipart uploading (part_size %d,
-            expected_size %d)')
+            log.debug('Uploading fd %d using multipart uploading '\
+                      '(part_size %d, expected_size %d)' % (
+                           fd, part_size, expected_size
+                      ))
 
             part_num = 1
             mp = bucket.initialize_multipart_upload(key_name)
 
             self._initialize_workers(
                 # try not to use more than 200 MB of ram if possible
-                queue_size=10 if part_size < 10 * 1024 ** 2 else 1,
+                10 if part_size < 10 * 1024 ** 2 else 1,
                 mp.id,
                 mp.key_name
             )
@@ -181,7 +183,7 @@ class BotoBackend(object):
                 except AWSConnectionError, e:
                     log.warning('Transfer of part %d of "%s" '\
                                 'failed (%d retries left): %s'\
-                    % (part_num, key_name, n, str(e))
+                    % (part_num, key_name, n, str(e)))
                     n -= 1
 
         log.debug('Done transfering part %d' % part_num)
